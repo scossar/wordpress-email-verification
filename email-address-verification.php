@@ -5,7 +5,7 @@
  * Version: 0.1.0
  * Text-Domain: t11-verification
  *
- * @package T11EmailVerification
+ * @package Testeleven\WordPressEmailVerification
  */
 
 /**  Copyright 2016
@@ -24,4 +24,8 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
+
+require_once( __DIR__ . '/lib/wordpress-email-verification.php' );
+
+$testeleven_email_verifier = new Testeleven\WordPressEmailVerification\WordPressEmailVerification( 'testeleven_email_signature' );
 
