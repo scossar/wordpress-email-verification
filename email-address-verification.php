@@ -3,7 +3,7 @@
  * Plugin Name: Email Address Verification
  * Description: Validates WordPress user's email addresses
  * Version: 0.1.0
- * Text-Domain: t11-verification
+ * Text-Domain: testeleven
  *
  * @package Testeleven\WordPressEmailVerification
  */
