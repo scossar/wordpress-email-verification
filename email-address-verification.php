@@ -27,5 +27,5 @@
 
 require_once( __DIR__ . '/lib/wordpress-email-verification.php' );
 
-$testeleven_email_verifier = new Testeleven\WordPressEmailVerification\WordPressEmailVerification( 'testeleven_email_signature' );
+$testeleven_email_verifier = new Testeleven\WordPressEmailVerification\WordPressEmailVerification( 'testeleven_email_signature', 'testeleven', 'testeleven' );
 
