@@ -1,7 +1,9 @@
 <?php
 /**
  * Allows for email address verification in WordPress.
- * 
+ *
+ * This class is set up to be as reusable as possible, with the hope that people will use and improve on it.
+ *
  * @package Testeleven\WordPressEmailVerification
  */
 
@@ -11,7 +13,7 @@ namespace Testeleven\WordPressEmailVerification;
  * This file overwrites the pluggable WordPress `wp_new_user_notification` method to include an email verification signature.
  *
  * The signature is made like this:
- *`$email_verification_sig = time() . ':' . wp_generate_password( 20, false );`
+ *`$email_verification_sig = time() . '_' . wp_generate_password( 20, false );`
  * It is added to the activation url that is included in the 'new user notification' email with the key of 'mail_key'.
  * This is how the url is put together:
  *`"wp-login.php?action=rp&key=$key&mail_key=$email_verification_sig&login=" . rawurlencode($user->user_login), 'login') . ">\r\n\r\n";`
@@ -20,11 +22,38 @@ namespace Testeleven\WordPressEmailVerification;
  */
 require_once( __DIR__ . '/wp-new-user-notification.php' );
 
+/**
+ * Class WordPressEmailVerification
+ *
+ * @package WPDiscourse\WordPressEmailVerification
+ */
 class WordPressEmailVerification {
-	
+	/**
+	 * The key under which the verification signature is stored in the database.
+	 *
+	 * @var string
+	 */
 	protected $verification_signature_key_name;
+
+	/**
+	 * The site prefix, used to avoid naming collisions in the database.
+	 *
+	 * @var string
+	 */
 	protected $site_prefix;
+
+	/**
+	 * The plugin text domain.
+	 *
+	 * @var string
+	 */
 	protected $text_domain;
+
+	/**
+	 * The time period for which the key sent by the `send_verification_email` method is valid.
+	 *
+	 * @var int
+	 */
 	protected $email_expiration_period = HOUR_IN_SECONDS;
 
 	/**
@@ -33,19 +62,26 @@ class WordPressEmailVerification {
 	 * Note: the `verification_signature_key_name` must be equal to the name under which the signature is stored
 	 * in `wp-new-user-notification.php`.
 	 *
-	 * @param string $verification_signature_key_name The name of the key that the verification signature is stored under
-	 * @param string $site_prefix A site prefix to avoid naming collisions in the database, for example 'testeleven'
-	 * @param string $text_domain The key for your text domain
+	 * @param string $verification_signature_key_name The name of the key that the verification signature is stored under.
+	 * @param string $site_prefix A site prefix to avoid naming collisions in the database, for example 'testeleven'.
+	 * @param string $text_domain The key for your text domain.
 	 */
-	public function __construct( $verification_signature_key_name, $site_prefix = 'testeleven', $text_domain = 'testeleven' ) {
-		
+	public function __construct( $verification_signature_key_name, $site_prefix, $text_domain = '' ) {
+
 		$this->verification_signature_key_name = $verification_signature_key_name;
-		$this->site_prefix = $site_prefix;
-		$this->text_domain = $text_domain;
-		
+		$this->site_prefix                     = $site_prefix;
+		$this->text_domain                     = $text_domain;
+
 		add_action( 'init', array( $this, 'initialize' ) );
 	}
-	
+
+	/**
+	 * Initializes the class.
+	 *
+	 * This function hooks into the 'user_register' action to flag all newly registered user's emails as unverified.
+	 * The 'resetpass_form' and 'login_form' hooks are used to add a hidden 'mail_key' field to the reset password and
+	 * login forms.
+	 */
 	public function initialize() {
 
 		add_action( 'user_register', array( $this, 'flag_email' ) );
@@ -59,7 +95,7 @@ class WordPressEmailVerification {
 	/**
 	 * Flags all users when they first register as having an unverified email address.
 	 *
-	 * @param int $user_id The user's ID
+	 * @param int $user_id The user's ID.
 	 */
 	public function flag_email( $user_id ) {
 
@@ -73,23 +109,28 @@ class WordPressEmailVerification {
 	 */
 	public function mail_key_field() {
 
-		if ( isset( $_REQUEST['mail_key'] ) ) {
-			$mail_key = $_REQUEST['mail_key'];
-			echo '<input type="hidden" name="mail_key" value="' . $mail_key . '" />';
+		if ( isset( $_REQUEST['mail_key'] ) ) { // Input var okay.
+
+			$mail_key = sanitize_key( wp_unslash( $_REQUEST['mail_key'] ) ); // Input var okay.
+			wp_nonce_field( 'verify_email', 'verify_email_nonce' );
+			echo '<input type="hidden" name="mail_key" value="' . esc_attr( $mail_key ) . '" />';
 		}
 	}
 
 	/**
 	 * Attempts to verify the email address after the user responds to the 'new user notification' email.
 	 *
-	 * @param \WP_User $user The user who's password has been reset
+	 * @param \WP_User $user The user who's password has been reset.
 	 */
 	public function verify_email_after_password_reset( $user ) {
-		
-		if ( isset( $_POST['mail_key'] ) ) {
-			$sig       = $_POST['mail_key'];
+
+		if ( isset( $_POST['mail_key'] ) && isset( $_POST['verify_email_nonce'] ) ) { // Input var okay.
+			if ( ! wp_verify_nonce( sanitize_key( wp_unslash( $_POST['verify_email_nonce'] ) ), 'verify_email' ) ) { // Input var okay.
+				return 0;
+			}
+			$sig       = sanitize_key( wp_unslash( $_POST['mail_key'] ) ); // Input var okay.
 			$user_id   = $user->ID;
-			$saved_sig = $this->get_user_signature_value( $user_id );
+			$saved_sig = sanitize_key( $this->get_user_signature_value( $user_id ) );
 
 			if ( $sig === $saved_sig ) {
 				$this->remove_unverified_flag( $user_id );
@@ -102,17 +143,19 @@ class WordPressEmailVerification {
 	/**
 	 * Attempts to verify the email address when the user replies to the verification email.
 	 *
-	 * @param string $user_name The user's name
-	 * @param \WP_User $user The user who has logged in
+	 * @param string   $user_name The user's name.
+	 * @param \WP_User $user The user who has logged in.
 	 */
 	public function verify_email_after_login( $user_name, $user ) {
 
-		if ( isset( $_POST['mail_key'] ) ) {
+		if ( isset( $_POST['mail_key'] ) && isset( $_POST['verify_email_nonce']) ) { // Input var okay.
+			if ( ! wp_verify_nonce( sanitize_key( wp_unslash( $_POST['verify_email_nonce'] ) ), 'verify_email' ) ) { // Input var okay.
+				return 0;
+			}
 			$user_id = $user->ID;
-			list( $sig_created_at, $sig_value ) = explode( ':', $_POST['mail_key'] );
+			list( $sig_created_at, $sig_value ) = explode( '_', sanitize_key( wp_unslash( $_POST['mail_key'] ) ) ); // Input var okay.
 			$saved_sig = $this->get_user_signature_value( $user_id );
-			list( $saved_sig_create_at, $saved_sig_value ) = explode( ':', $saved_sig );
-			// Todo: compare time stamps to make sure the timestamp in the request key hasn't been altered.
+			list( $saved_sig_create_at, $saved_sig_value ) = explode( '_', sanitize_key( wp_unslash( $saved_sig ) ) );
 			$expired_sig = time() > intval( $sig_created_at ) + $this->email_expiration_period;
 
 			if ( $expired_sig ) {
@@ -174,7 +217,7 @@ class WordPressEmailVerification {
 	 * The message includes a login link that has an email verification signature. Unless `$force` is set to true, the
 	 * message will not be sent more than once every hour.
 	 *
-	 * @param int $user_id The user to send the message to
+	 * @param int  $user_id The user to send the message to
 	 * @param bool $force Whether to force sending the email before the `email_expiration_period` has passed. (Used when there is a signature mismatch.)
 	 * @param bool $admin
 	 */
@@ -198,7 +241,7 @@ class WordPressEmailVerification {
 			@wp_mail( get_option( 'admin_email' ), sprintf( __( '[%s] Existing User Email Verification', $this->text_domain ), $blogname ), $message );
 		}
 
-		$email_verification_sig = $current_time . ':' . wp_generate_password( 20, false );
+		$email_verification_sig = $current_time . '_' . wp_generate_password( 20, false );
 		$this->update_user_signature_value( $user_id, $email_verification_sig );
 		$this->update_user_verification_time( $user_id, $current_time );
 
@@ -256,7 +299,7 @@ class WordPressEmailVerification {
 	/**
 	 * Sets the verification status for a user.
 	 *
-	 * @param int $user_id The user's ID
+	 * @param int   $user_id The user's ID
 	 * @param mixed $status The value to be set.
 	 */
 	protected function set_verification_status( $user_id, $status ) {
@@ -344,7 +387,7 @@ class WordPressEmailVerification {
 	/**
 	 * Updates the database entry for the user's verification signature.
 	 *
-	 * @param int $user_id The user's ID
+	 * @param int    $user_id The user's ID
 	 * @param string $sig The new signature
 	 */
 	protected function update_user_signature_value( $user_id, $sig ) {
@@ -386,3 +429,4 @@ class WordPressEmailVerification {
 		exit;
 	}
 }
+
